@@ -1,13 +1,21 @@
 import { createGame, nostrDiscovery, trysteroTransport } from '../src/index.ts';
+import { networkConfig, networkErrorMessage } from './network-config.mjs';
 
 const $ = id => document.getElementById(id);
 const keys = new Set();
-// Optional local relay override used by the browser integration fixture.
-const relayUrl = import.meta.env.VITE_RELAY_URL;
+let connection;
+try { connection = networkConfig(import.meta.env); }
+catch (error) {
+  $('message').textContent = networkErrorMessage(error);
+  $('status').textContent = '网络配置错误';
+  $('host').disabled = $('join').disabled = true;
+  throw error;
+}
+const { relayUrl, options: connectionOptions } = connection;
 let session, state = { positions: {} }, self = '', pending = false, publicRooms = [], lobby, openingLobby = false;
 const game = createGame({
   appId: 'org.opengamep2p.arena.v1',
-  transport: relayUrl ? trysteroTransport({ relayConfig: { urls: [relayUrl], redundancy: 1 }, rtcConfig: { iceServers: [] } }) : undefined,
+  transport: trysteroTransport(connectionOptions),
   lobby: relayUrl ? { transport: nostrDiscovery({ relayUrls: [relayUrl] }) } : undefined,
   initialState: { positions: {} },
   validateInput: v => v !== null && typeof v === 'object' &&
@@ -24,7 +32,7 @@ const game = createGame({
     });
     return state;
   },
-  onError: error => { $('message').textContent = error.message; },
+  onError: error => { $('message').textContent = networkErrorMessage(error); },
 });
 
 function controls(connected) {
@@ -48,7 +56,7 @@ async function connect(host) {
       session = undefined; state = { positions: {} }; keys.clear();
       $('status').textContent = reason === 'left' ? '已离开房间' : '房间已结束'; controls(false);
     });
-  } catch (error) { $('message').textContent = error.message; $('status').textContent = '连接失败'; }
+  } catch (error) { $('message').textContent = networkErrorMessage(error); $('status').textContent = '连接失败'; }
   finally { pending = false; controls(!!session?.connected); }
 }
 $('host').onclick = () => connect(true);
@@ -104,7 +112,7 @@ setInterval(() => {
   if (!session?.connected) return;
   const held = (...names) => names.some(name => keys.has(name)) ? 1 : 0;
   session.sendInput({ x: held('ArrowRight', 'd') - held('ArrowLeft', 'a'), y: held('ArrowDown', 's') - held('ArrowUp', 'w') })
-    .catch(error => { $('message').textContent = error.message; });
+    .catch(error => { $('message').textContent = networkErrorMessage(error); });
 }, 1000 / 30);
 
 const ctx = $('arena').getContext('2d');

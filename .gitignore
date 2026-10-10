@@ -4,3 +4,6 @@ demo-dist/
 .idea/
 .DS_Store
 *.tgz
+.env
+.env.*
+!.env.example

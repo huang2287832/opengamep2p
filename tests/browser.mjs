@@ -35,7 +35,7 @@ relay.on('connection', socket => {
   socket.on('close', () => subscriptions.delete(socket));
 });
 const server = await createServer({ server: { host: '127.0.0.1', port: 0 },
-  define: { 'import.meta.env.VITE_RELAY_URL': JSON.stringify(relayUrl) } });
+  define: { 'import.meta.env.VITE_RELAY_URL': JSON.stringify(relayUrl), 'import.meta.env.VITE_TEST_LOCAL_ICE': 'true' } });
 let browser;
 try {
   await server.listen();

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Added best-effort public freeSTUN TURN fallback; developer TURN replaces it and explicit ICE lists retain full control.
+
+- Added demo TURN configuration through `.env.local` with UDP/TCP/TLS URLs and relay-only diagnosis.
+- Added actionable Chinese messages for failed SDP connectivity and join timeouts.
+- Preserved default STUN when selecting a custom signaling relay.
+
 ## 0.2.0
 
 - Added `game.lobby()`, `lobby.onRooms()`, and `game.host({ public: true, name })`.

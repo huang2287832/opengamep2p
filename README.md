@@ -208,7 +208,42 @@ const transport = trysteroTransport({
 // 在 createGame({ ...游戏配置, transport }) 中使用。
 ```
 
-上面是字段格式示例，`.example` 地址不可连接。默认不配置 TURN，不需要账号或密钥。需要 TURN 时使用你已有的托管服务凭据；不要把长期私有 TURN 密钥提交到公开仓库。适配器也支持 `rtcConfig`，但覆盖 `rtcConfig.iceServers` 时会替换 Trystero 默认 STUN 配置，需自行包含需要的 ICE 服务器。
+上面是字段格式示例，`.example` 地址不可连接。默认无需配置：ICE 优先选择可用的直连路径，直连不可用时使用 TURN 候选。未设置 `turnConfig` 时自动加入 [freeSTUN 公布的公共 TURN](https://freestun.net/)（`turn:freestun.net:3478`，公开账号和密码均为 `free`），无需注册。开发者提供 `turnConfig` 时会替换公共兜底；配置错误或服务不可达时不会再混入公共 TURN。`turnConfig: []` 可关闭公共兜底。公共服务属于尽力而为，尚未验证当前中继可用性及中国—新加坡链路，不保证长期可用。使用托管服务时，不要把长期私有 TURN 密钥提交到公开仓库。适配器也支持 `rtcConfig`，但覆盖 `rtcConfig.iceServers` 时会替换 Trystero 默认 STUN 配置，需自行包含需要的 ICE 服务器。
+
+## 跨运营商 / 跨国家无法加入时
+
+`could not connect ... after exchanging SDP` 表示双方已交换连接信息，但 ICE 未建立连接。可能与 NAT、UDP 防火墙、STUN 或候选地址可达性有关；不能从这个报错确定是某个国家或运营商的固定限制。
+
+| 服务 | 作用 | 是否转发游戏数据 |
+| --- | --- | --- |
+| 信令 relay | 让双方发现彼此、交换连接信息 | 不转发游戏数据 |
+| STUN | 帮助浏览器获取公网地址、尝试直连 | 不转发游戏数据 |
+| TURN | 直连失败时中转两端的加密数据 | 转发数据，但不运行游戏逻辑 |
+
+TURN 不是每次联机都必须使用。默认优先尝试直连；某些网络组合必须借助中继才能联机。更换 STUN 有时能改善发现，但不能替代必须中继时的 TURN。托管 TURN 仍符合“零自建服务器”，但中继会消耗服务商资源，不代表所有游戏流量永远零服务器成本。
+
+示例无需填写环境变量即可使用默认公共 TURN。需要替换为开发者的 TURN 时：
+
+```sh
+cp .env.example .env.local
+```
+
+在 `.env.local` 填入**服务商实际提供的地址和短期凭据**，例如以下占位格式：
+
+```dotenv
+VITE_TURN_URLS=turn:provider.example:3478?transport=udp,turns:provider.example:443?transport=tcp
+VITE_TURN_USERNAME=temporary-user
+VITE_TURN_CREDENTIAL=temporary-credential
+VITE_ICE_TRANSPORT_POLICY=all
+```
+
+`.example` 不能用于真实连接，服务商不支持的端口也不能自行添加。优先包含服务商支持的 UDP、TCP 及 TLS 地址；TLS 443 有助于某些限制 UDP 的网络，但仍需确认中国与新加坡两端实际可达。
+
+修改后重启 `npm run dev`；部署静态示例时重新运行 `npm run build:demo` 并发布 `demo-dist/`，让两端都使用更新后的页面。配置自定义 TURN 时，双方都应使用有效凭据，凭据可以不同。临时设置 `VITE_ICE_TRANSPORT_POLICY=relay` 可强制使用 TURN 做诊断（未填自定义 TURN 时测试默认公共服务）；确认可用后改回 `all`，允许直连。
+
+`VITE_*` 会进入浏览器包。`.env.local` 已忽略，但这不使打包后的凭据保密；这里的静态配置只适合短期凭据测试。生产环境应通过受信任的服务端/托管接口签发并更新短期 TURN 凭据，不要把永久 API 密钥放在浏览器中。本库不会自动创建 TURN 账号或保证跨境网络可达性。
+
+默认配置已接入公开 TURN 地址；配置优先级经自动测试验证，实际公共中继及中国—新加坡链路仍需公网实测。ICE 会同时收集直连和中继候选，优先选择可用的直连；不是等待一次连接彻底失败后再发起第二轮连接。
 
 ## 同步设计与边界
 
