@@ -42,6 +42,7 @@ export interface GameOptions<S extends Json, I extends Json> {
   tickRate?: number;
   snapshotRate?: number;
   maxPlayers?: number;
+  /** Total wait for host connectivity and admission. Default: 45000 ms. */
   joinTimeoutMs?: number;
   maxMessageBytes?: number;
   /** Expire held input when a client stops sending it. */

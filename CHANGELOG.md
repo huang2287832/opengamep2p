@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Aligned default game signaling relays with lobby discovery instead of using a different appId-shuffled pool; custom relay URLs and redundancy remain supported.
+- Preserved original demo connection errors in the browser console and added a browser integration mode using default network/mDNS behavior.
+
+- Increased the default join deadline to 45 seconds to allow discovery and ICE negotiation; distinguished missing host connectivity from missing game admission in timeout diagnostics.
+
 - Added best-effort public freeSTUN TURN fallback; developer TURN replaces it and explicit ICE lists retain full control.
 
 - Added demo TURN configuration through `.env.local` with UDP/TCP/TLS URLs and relay-only diagnosis.

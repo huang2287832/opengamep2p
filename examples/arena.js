@@ -32,7 +32,7 @@ const game = createGame({
     });
     return state;
   },
-  onError: error => { $('message').textContent = networkErrorMessage(error); },
+  onError: error => { console.error('[opengamep2p] transport/session error', error); $('message').textContent = networkErrorMessage(error); },
 });
 
 function controls(connected) {
@@ -56,7 +56,7 @@ async function connect(host) {
       session = undefined; state = { positions: {} }; keys.clear();
       $('status').textContent = reason === 'left' ? '已离开房间' : '房间已结束'; controls(false);
     });
-  } catch (error) { $('message').textContent = networkErrorMessage(error); $('status').textContent = '连接失败'; }
+  } catch (error) { console.error('[opengamep2p] join/host failed', error); $('message').textContent = networkErrorMessage(error); $('status').textContent = '连接失败'; }
   finally { pending = false; controls(!!session?.connected); }
 }
 $('host').onclick = () => connect(true);

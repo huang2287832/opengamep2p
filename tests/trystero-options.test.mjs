@@ -5,6 +5,22 @@ import { networkConfig } from '../examples/network-config.mjs';
 
 const publicTurn = [{ urls: 'turn:freestun.net:3478', username: 'free', credential: 'free' }];
 
+test('signaling pins the same default relay pool as lobby discovery, preserving overrides and ICE', () => {
+  const defaults = Array.from({ length: 8 }, (_, i) => `wss://relay-${i}.example`);
+  assert.deepEqual(resolveTrysteroOptions({}, defaults).relayConfig.urls, defaults.slice(0, 5));
+  const options = Object.freeze({ relayConfig: Object.freeze({ redundancy: 2, warnOnRelayFailure: false }), rtcConfig: { iceServers: [] } });
+  assert.deepEqual(resolveTrysteroOptions(options, defaults), {
+    relayConfig: { redundancy: 2, warnOnRelayFailure: false, urls: defaults.slice(0, 2) },
+    rtcConfig: { iceServers: [] },
+  });
+  assert.equal(options.relayConfig.urls, undefined);
+  const custom = { relayConfig: { urls: ['wss://custom.example'], redundancy: 1 } };
+  assert.deepEqual(resolveTrysteroOptions(custom, defaults).relayConfig, custom.relayConfig);
+  const first = resolveTrysteroOptions({}, defaults);
+  first.relayConfig.urls.pop();
+  assert.equal(defaults.length, 8);
+});
+
 test('default and demo configurations enable public TURN and preserve default STUN/direct ICE', () => {
   for (const options of [{}, networkConfig({}).options, { relayConfig: { urls: ['wss://relay.example'] } }]) {
     const resolved = resolveTrysteroOptions(options);

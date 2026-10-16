@@ -165,7 +165,7 @@ const lobbyOptions = {
 };
 ```
 
-`.example` 是占位地址。默认选择 Trystero 公布的 relay 列表中的前五个，不需要额外账号。大厅和游戏信令的 relay 配置分别通过 `nostrDiscovery()` 与 `trysteroTransport()` 设置；替换游戏 transport 不会自动改变大厅发现策略。
+`.example` 是占位地址。大厅与游戏信令默认都选择 Trystero 公布的 relay 列表中的前五个，不需要额外账号，避免大厅可达但游戏使用另一组不可达节点。自定义配置分别通过 `nostrDiscovery()` 与 `trysteroTransport()` 设置；替换游戏 transport 不会自动改变大厅发现策略。两条通路使用的事件类型和协议不同，同一组节点也不保证都允许游戏信令。
 
 `ttlMs` 必须至少为 `heartbeatMs` 的三倍且不超过 120 秒。`maxRooms` 为 1–1000。高级调用方可以通过 `DiscoveryFactory` 替换发现机制；它与游戏 `TransportFactory` 分开，避免发现依赖游戏连接。
 
@@ -179,7 +179,7 @@ const lobbyOptions = {
 | `tickRate` | `60` | 主机固定模拟频率，1–240 Hz |
 | `snapshotRate` | `20` | 权威快照频率，不超过 tickRate |
 | `maxPlayers` | `8` | 包括主机的人数上限，最多 64；建议小规模房间 |
-| `joinTimeoutMs` | `15000` | 等待主机准入的超时时间 |
+| `joinTimeoutMs` | `45000` | 等待主机准入的超时时间 |
 | `inputTimeoutMs` | `1000` | 输入超时后从当前控制映射移除 |
 | `maxMessageBytes` | `65536` | JSON 协议消息的 UTF-8 字节上限，包括快照 |
 | `manualTick` | `false` | 使用自己的固定更新循环 |
@@ -211,6 +211,8 @@ const transport = trysteroTransport({
 上面是字段格式示例，`.example` 地址不可连接。默认无需配置：ICE 优先选择可用的直连路径，直连不可用时使用 TURN 候选。未设置 `turnConfig` 时自动加入 [freeSTUN 公布的公共 TURN](https://freestun.net/)（`turn:freestun.net:3478`，公开账号和密码均为 `free`），无需注册。开发者提供 `turnConfig` 时会替换公共兜底；配置错误或服务不可达时不会再混入公共 TURN。`turnConfig: []` 可关闭公共兜底。公共服务属于尽力而为，尚未验证当前中继可用性及中国—新加坡链路，不保证长期可用。使用托管服务时，不要把长期私有 TURN 密钥提交到公开仓库。适配器也支持 `rtcConfig`，但覆盖 `rtcConfig.iceServers` 时会替换 Trystero 默认 STUN 配置，需自行包含需要的 ICE 服务器。
 
 ## 跨运营商 / 跨国家无法加入时
+
+默认加入等待为 45 秒，为公共信令发现及 ICE 协商留出时间；可通过 `joinTimeoutMs` 修改。超时报错中的 `host-not-connected` 表示还没有连接到邀请中的主机，`host-admission-timeout` 表示数据通道已连接但没有收到有效的游戏准入。延长等待不保证解决信令或 ICE 失败。同一 Wi-Fi 仍需要双方访问相同的公共信令节点。
 
 `could not connect ... after exchanging SDP` 表示双方已交换连接信息，但 ICE 未建立连接。可能与 NAT、UDP 防火墙、STUN 或候选地址可达性有关；不能从这个报错确定是某个国家或运营商的固定限制。
 
@@ -267,6 +269,7 @@ npm run check          # TypeScript 编译 + 逻辑/协议测试
 npm run build:demo     # 静态示例构建
 npx playwright install chromium # 首次安装测试浏览器，macOS 也可使用已安装的 Chrome
 npm run test:browser   # 真实 Trystero + WebRTC 的三浏览器集成测试
+TEST_BROWSER_DEFAULT_NETWORK=1 npm run test:browser # 使用浏览器默认网络/mDNS 行为（POSIX shell）
 npm pack --dry-run     # 检查库发布文件
 ```
 
@@ -274,7 +277,7 @@ npm pack --dry-run     # 检查库发布文件
 
 浏览器集成脚本通过本地测试 Nostr relay 和真实 WebRTC 检查三名玩家、公开大厅、晚加入、人数同步、下架、示例页面点击加入与信令不携带游戏状态。测试 relay 只存在于 `tests/browser.mjs`，不参与产品运行。它验证本机网络连接，不证明所有公网 NAT 组合可用；正式发布前应使用不同运营商和设备补充公网测试。
 
-CI 包含编译、协议测试、示例构建、浏览器集成及打包检查。当前执行环境禁止监听本地端口，浏览器集成测试尚未在该环境完成；不要把它当作已通过的公网验证。
+CI 包含编译、协议测试、示例构建、浏览器集成及打包检查。本次本机验证已通过三浏览器集成，包括浏览器默认网络/mDNS 模式；测试使用本地信令节点，不能替代两台实体 PC 或公共信令、不同运营商网络的实测。
 
 ## 开源发布
 

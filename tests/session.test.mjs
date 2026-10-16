@@ -76,7 +76,7 @@ test('join timeout, invitation validation, single session guard and reuse', asyn
   await assert.rejects(owner.host(), /active session/);
   await assert.rejects(game().join('ogp1.bad'), /Invalid invitation/);
   const invite = host.invite; await host.leave();
-  await assert.rejects(game().join(invite), /timed out/); assert.equal(network.connections(), 0);
+  await assert.rejects(game().join(invite), /host-not-connected/); assert.equal(network.connections(), 0);
   const next = await owner.host(); await next.leave();
   await assert.rejects(next.sendInput(1), /not connected/);
 });
@@ -142,4 +142,21 @@ test('protocol packets over the size budget are discarded and sparse JSON state 
   host.step(); await settle(); assert.equal(host.state.count, 0);
   await host.leave();
   assert.throws(() => setup({ initialState: { sparse: Array(2) } }).game(), /JSON/);
+});
+
+
+test('connected host without valid welcome reports admission timeout and cleans up guest', async () => {
+  const network = memoryNetwork();
+  const options = { appId: 'silent-host', initialState: {}, manualTick: true, update: s => s,
+    validateInput: () => true, joinTimeoutMs: 25 };
+  const host = await createGame({ ...options, transport: async args => {
+    const transport = await network.factory(args);
+    return { ...transport, send: async () => {} };
+  } }).host();
+  try {
+    const guest = createGame({ ...options, transport: network.factory });
+    await assert.rejects(guest.join(host.invite), /host-admission-timeout/);
+    assert.equal(network.connections(), 1);
+  } finally { await host.leave(); }
+  assert.equal(network.connections(), 0);
 });

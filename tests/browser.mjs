@@ -44,7 +44,9 @@ try {
     ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } :
       process.platform === 'darwin' ? { executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' } : {}),
     headless: true,
-    args: ['--disable-features=WebRtcHideLocalIpsWithMdns', '--force-webrtc-ip-handling-policy=default_public_and_private_interfaces'],
+    // Opt in to normal browser mDNS behavior when checking LAN candidate handling.
+    args: process.env.TEST_BROWSER_DEFAULT_NETWORK === '1' ? [] :
+      ['--disable-features=WebRtcHideLocalIpsWithMdns', '--force-webrtc-ip-handling-policy=default_public_and_private_interfaces'],
   });
   const pages = [];
   for (let index = 0; index < 3; index++) {

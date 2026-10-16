@@ -37,3 +37,9 @@ test('forced relay can diagnose the default public TURN without developer creden
   assert.deepEqual(networkConfig({ VITE_ICE_TRANSPORT_POLICY: 'relay' }).options,
     { rtcConfig: { iceTransportPolicy: 'relay' } });
 });
+
+
+test('timeout UI distinguishes transport connection from game admission', () => {
+  assert.match(networkErrorMessage(new Error('Join timed out after 45000ms: host-not-connected')), /尚未与主机建立数据连接/);
+  assert.match(networkErrorMessage(new Error('Join timed out after 45000ms: host-admission-timeout')), /已与主机建立数据连接/);
+});

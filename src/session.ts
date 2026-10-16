@@ -143,7 +143,10 @@ export class Session<S extends Json, I extends Json> {
     return new Promise((resolve, reject) => {
       this.resolveReady = resolve; this.rejectReady = reject;
       this.timeout = setTimeout(() => {
-        this.rejectReady?.(new Error('Join timed out: host unavailable or P2P connection blocked; check signaling/STUN/TURN'));
+        const stage = this.transport.peers().includes(this.hostId)
+          ? 'host-admission-timeout: data channel connected but host did not send a valid welcome'
+          : 'host-not-connected: no data channel to host; signaling or ICE may be incomplete';
+        this.rejectReady?.(new Error(`Join timed out after ${this.options.joinTimeoutMs}ms: ${stage}`));
         void this.finish('join-timeout');
       }, this.options.joinTimeoutMs);
       this.helloTimer = setInterval(() => this.hello(), 500);
@@ -252,7 +255,7 @@ export class Session<S extends Json, I extends Json> {
 export function createGame<S extends Json, I extends Json>(options: GameOptions<S, I>) {
   const config: Resolved<S, I> = {
     gameVersion: '1', tickRate: 60, snapshotRate: 20, maxPlayers: 8,
-    joinTimeoutMs: 15000, maxMessageBytes: 64 * 1024, inputTimeoutMs: 1000,
+    joinTimeoutMs: 45000, maxMessageBytes: 64 * 1024, inputTimeoutMs: 1000,
     ...options,
   };
   if (!config.appId.trim() || config.appId.length > 200) throw new Error('appId must contain 1–200 characters');

@@ -28,6 +28,8 @@ export function networkErrorMessage(error) {
       ? '已交换连接信息，但直连及 TURN 中继均未建立连接。默认公共 TURN 可能不可达，可配置其他 TURN 服务后重试。'
       : '已交换连接信息，但连接仍失败。请检查双方 TURN 地址、凭据是否有效，以及网络是否能访问该服务。';
   }
+  if (/host-admission-timeout/i.test(message)) return '加入超时：已与主机建立数据连接，但未收到有效的游戏准入。请确认主机页面仍在前台运行，并检查双方游戏版本和主机控制台错误。';
+  if (/host-not-connected/i.test(message)) return '加入超时：尚未与主机建立数据连接。请确认主机房间仍有效；即使同一 Wi-Fi，也需要双方能访问信令服务。请保留此前控制台中的信令或 ICE 报错。';
   if (/Join timed out/i.test(message)) return '加入超时：主机可能不可达或网络连接受限。跨网络连接失败时请检查信令、STUN 与 TURN 配置。';
   return message;
 }
