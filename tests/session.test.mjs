@@ -135,6 +135,109 @@ test('backpressure keeps at most one broadcast snapshot outstanding', async () =
   await host.leave();
 });
 
+test('a congested guest cannot stall snapshots for healthy guests, and recovers at the latest tick', async () => {
+  const network = memoryNetwork();
+  let slowId, blocked = 0;
+  const pending = [];
+  const options = { appId: 'independent-backpressure', initialState: { count: 0 }, manualTick: true,
+    snapshotRate: 60, validateInput: v => typeof v === 'number', update: state => ({ count: state.count + 1 }),
+    transport: async config => {
+      const transport = await network.factory(config);
+      return { ...transport, send: async (packet, targets) => {
+        const ids = typeof targets === 'string' ? [targets] : targets;
+        if (packet.type === 'snapshot' && ids.includes(slowId)) {
+          blocked++; await new Promise(resolve => pending.push(resolve));
+        }
+        await transport.send(packet, targets);
+      } };
+    },
+  };
+  const host = await createGame(options).host();
+  const slow = await createGame(options).join(host.invite);
+  const fast = await createGame(options).join(host.invite);
+  try {
+    await settle(); slowId = slow.id;
+    for (let i = 0; i < 20; i++) { host.step(); await settle(); }
+    assert.equal(blocked, 1, 'Only one outstanding snapshot for the congested guest');
+    assert.equal(fast.tick, host.tick, 'A healthy guest must continue receiving snapshots');
+    assert.ok(slow.tick < host.tick);
+    slowId = undefined;
+    pending.shift()(); await settle(); host.step(); await settle();
+    assert.equal(slow.tick, host.tick, 'Recovery skips obsolete intermediate snapshots');
+  } finally {
+    pending.splice(0).forEach(resolve => resolve());
+    await host.leave();
+  }
+});
+
+test('held inputs keep only one active send and the latest pending release under congestion', async () => {
+  const network = memoryNetwork(), pending = [], sent = [];
+  const options = { appId: 'input-backpressure', initialState: { count: 0 }, manualTick: true,
+    validateInput: v => typeof v === 'number', update: (state, { inputs }) => ({ count: [...inputs.values()].reduce((a, b) => a + b, 0) }),
+    transport: async config => {
+      const transport = await network.factory(config);
+      return { ...transport, send: async (packet, target) => {
+        if (packet.type === 'input') {
+          sent.push(packet); await new Promise(resolve => pending.push(resolve));
+        }
+        await transport.send(packet, target);
+      } };
+    },
+  };
+  const host = await createGame(options).host(); const guest = await createGame(options).join(host.invite);
+  try {
+    const calls = [guest.sendInput(1)];
+    await settle();
+    for (let i = 0; i < 99; i++) calls.push(guest.sendInput(1));
+    calls.push(guest.sendInput(0));
+    await Promise.all(calls.slice(1, -1));
+    assert.equal(sent.length, 1);
+    pending.shift()(); await settle();
+    assert.deepEqual(sent.map(packet => [packet.sequence, packet.input]), [[1, 1], [101, 0]]);
+    pending.shift()(); await Promise.all(calls); await settle();
+    host.step(); assert.equal(host.state.count, 0, 'The latest key release must reach the host');
+    const active = guest.sendInput(1); await settle();
+    const queued = guest.sendInput(2);
+    const results = Promise.allSettled([active, queued]);
+    await guest.leave();
+    assert.deepEqual((await results).map(result => result.status), ['rejected', 'rejected']);
+    pending.splice(0).forEach(resolve => resolve()); await settle();
+    assert.equal(sent.length, 3, 'Closing must not start the queued send');
+  } finally { pending.splice(0).forEach(resolve => resolve()); await host.leave(); }
+});
+
+test('phone hosting needs only phone-PC links; PC hosting needs the blocked PC-PC link', async () => {
+  const network = memoryNetwork(); let nextDevice = 0;
+  const devices = new Map();
+  const isBlocked = (a, b) => devices.get(a)?.startsWith('pc') && devices.get(b)?.startsWith('pc');
+  const options = { appId: 'pairwise-topology', initialState: {}, manualTick: true,
+    update: s => s, validateInput: () => true, joinTimeoutMs: 25,
+    transport: async config => {
+      const transport = await network.factory(config);
+      const device = ['phone', 'pc-a', 'pc-b'][nextDevice++ % 3];
+      devices.set(transport.selfId, device);
+      return { ...transport,
+        peers: () => transport.peers().filter(peer => !isBlocked(transport.selfId, peer)),
+        send: (packet, target) => transport.send(packet,
+          (typeof target === 'string' ? [target] : target).filter(peer => !isBlocked(transport.selfId, peer))),
+      };
+    },
+  };
+  const phone = await createGame(options).host();
+  const pcA = await createGame(options).join(phone.invite);
+  const pcB = await createGame(options).join(phone.invite);
+  await settle(); assert.equal(pcB.players.length, 3);
+  await phone.leave();
+  // Allocate PC A as host, then phone and PC B as guests with the same blocked link.
+  nextDevice = 1;
+  const pcHost = await createGame(options).host();
+  try {
+    await assert.rejects(createGame(options).join(pcHost.invite), /host-not-connected/);
+    const phoneGuest = await createGame(options).join(pcHost.invite);
+    assert.equal(phoneGuest.connected, true);
+  } finally { await pcHost.leave(); }
+});
+
 test('protocol packets over the size budget are discarded and sparse JSON state is rejected', async () => {
   const { game, network } = setup({ maxMessageBytes: 200, validateInput: v => typeof v === 'number' });
   const host = await game().host(); const guest = await game().join(host.invite);

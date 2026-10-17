@@ -5,6 +5,7 @@ import type { HostOptions } from './discovery-types.js';
 import type { GameOptions, Json, Player, Transport } from './types.js';
 
 type Listener<T> = (value: T) => void;
+type PendingInput = { packet: Json; resolve: () => void; reject: (error: unknown) => void };
 type Resolved<S extends Json, I extends Json> = GameOptions<S, I> & {
   gameVersion: string; tickRate: number; snapshotRate: number; maxPlayers: number;
   joinTimeoutMs: number; maxMessageBytes: number; inputTimeoutMs: number;
@@ -46,7 +47,9 @@ export class Session<S extends Json, I extends Json> {
   private closed = false;
   private sequence = 0;
   private frame = 0;
-  private snapshotBusy = false;
+  private snapshotBusy = new Map<string, symbol>();
+  private activeInput?: PendingInput;
+  private pendingInput?: PendingInput;
   private snapshotBudget = 0;
   private closePromise?: Promise<void>;
 
@@ -67,7 +70,7 @@ export class Session<S extends Json, I extends Json> {
       if (this.closed) return;
       if (!isHost && peer === hostId) { void this.finish('host-left'); return; }
       if (isHost && this.members.delete(peer)) {
-        this.inputs.delete(peer); this.emitPlayers(); this.broadcastSnapshot();
+        this.inputs.delete(peer); this.snapshotBusy.delete(peer); this.emitPlayers(); this.broadcastSnapshot();
       }
     });
     if (isHost && !options.manualTick) this.timer = setInterval(() => this.step(), 1000 / options.tickRate);
@@ -91,14 +94,34 @@ export class Session<S extends Json, I extends Json> {
     this.disconnectListeners.add(listener); return () => { this.disconnectListeners.delete(listener); };
   }
 
-  /** Send held controls regularly; input is expired after inputTimeoutMs. */
+  /** Send held controls regularly; input is expired after inputTimeoutMs.
+   * Under congestion, keep one send and the latest pending input. Superseded
+   * pending calls resolve without sending; this API is not a discrete-event queue.
+   */
   async sendInput(input: I): Promise<void> {
     this.assertActive();
     if (!this.validInput(input)) throw new Error('Invalid input');
     const packet: Json = { type: 'input', sequence: ++this.sequence, input };
     this.assertSize(packet);
     if (this.isHost) this.inputs.set(this.id, { value: clone(input), sequence: this.sequence, received: performance.now() });
-    else await this.transport.send(packet, this.hostId);
+    else await new Promise<void>((resolve, reject) => {
+      const entry = { packet: clone(packet), resolve, reject };
+      if (!this.activeInput) this.dispatchInput(entry);
+      else { this.pendingInput?.resolve(); this.pendingInput = entry; }
+    });
+  }
+
+  private dispatchInput(entry: PendingInput): void {
+    this.activeInput = entry;
+    void Promise.resolve().then(() => {
+      this.assertActive();
+      return this.transport.send(entry.packet, this.hostId);
+    }).then(entry.resolve, entry.reject).finally(() => {
+      if (this.activeInput !== entry) return;
+      this.activeInput = undefined;
+      const next = this.pendingInput; this.pendingInput = undefined;
+      if (next && !this.closed) this.dispatchInput(next);
+    });
   }
 
   /** Advance one fixed step; only the host simulates. Used with manualTick. */
@@ -176,7 +199,7 @@ export class Session<S extends Json, I extends Json> {
           value: clone(packet.input), sequence: packet.sequence, received: performance.now(),
         });
       } else if (packet.type === 'leave' && this.members.delete(peer)) {
-        this.inputs.delete(peer); this.emitPlayers(); this.broadcastSnapshot();
+        this.inputs.delete(peer); this.snapshotBusy.delete(peer); this.emitPlayers(); this.broadcastSnapshot();
       }
       return;
     }
@@ -215,11 +238,17 @@ export class Session<S extends Json, I extends Json> {
   }
   private remotePlayers(): string[] { return Array.from(this.members.keys()).filter(id => id !== this.id); }
   private broadcastSnapshot(): void {
-    const peers = this.remotePlayers();
-    if (this.snapshotBusy || !peers.length || this.closed) return;
-    this.snapshotBusy = true;
-    // One outstanding snapshot: skip frames under congestion rather than build an unbounded queue.
-    void this.transport.send(this.snapshot(), peers).catch(error => this.report(error)).finally(() => { this.snapshotBusy = false; });
+    const peers = this.remotePlayers().filter(peer => !this.snapshotBusy.has(peer));
+    if (!peers.length || this.closed) return;
+    const packet = this.snapshot();
+    // Each recipient has its own backpressure; a slow connection cannot freeze
+    // the room. Skip old frames and send current state when that peer is ready.
+    for (const peer of peers) {
+      const token = Symbol(); this.snapshotBusy.set(peer, token);
+      void this.transport.send(packet, peer).catch(error => this.report(error)).finally(() => {
+        if (this.snapshotBusy.get(peer) === token) this.snapshotBusy.delete(peer);
+      });
+    }
   }
   private send(packet: Json, target: string | string[]): void {
     if (Array.isArray(target) && !target.length) return;
@@ -243,6 +272,10 @@ export class Session<S extends Json, I extends Json> {
     clearInterval(this.timer); clearInterval(this.helloTimer); clearTimeout(this.timeout);
     this.rejectReady?.(new Error(reason)); this.rejectReady = undefined; this.resolveReady = undefined;
     this.inputs.clear(); this.members.clear();
+    this.snapshotBusy.clear();
+    this.activeInput?.reject(new Error('Session is not connected'));
+    this.pendingInput?.reject(new Error('Session is not connected'));
+    this.activeInput = undefined; this.pendingInput = undefined;
     this.closePromise = Promise.resolve().then(() => this.transport.close()).catch(error => this.report(error));
     this.emitPlayers();
     for (const listener of this.disconnectListeners) this.safeCall(listener, reason);

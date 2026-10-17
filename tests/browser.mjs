@@ -59,8 +59,18 @@ try {
         tickRate: 30, snapshotRate: 30, joinTimeoutMs: 20000,
         validateInput: v => typeof v === 'number' && Math.abs(v) <= 10,
         update: (state, { inputs }) => ({ ...state, count: state.count + [...inputs.values()].reduce((a, b) => a + b, 0) }),
-        transport: trysteroTransport({ relayConfig: { urls: [relayUrl], redundancy: 1 }, rtcConfig: { iceServers: [] },
-          onDiagnostics: report => { window.connectionDiagnostic = report; } }),
+        transport: async args => {
+          const transport = await trysteroTransport({ relayConfig: { urls: [relayUrl], redundancy: 1 }, rtcConfig: { iceServers: [] },
+            onDiagnostics: report => { window.connectionDiagnostic = report; } })(args);
+          window.pendingSnapshots = [];
+          return { ...transport, send: async (packet, target) => {
+            const targets = typeof target === 'string' ? [target] : target;
+            if (packet.type === 'snapshot' && targets.includes(window.slowPeerId)) {
+              await new Promise(resolve => window.pendingSnapshots.push(resolve));
+            }
+            await transport.send(packet, target);
+          } };
+        },
         lobby: { transport: nostrDiscovery({ relayUrls: [relayUrl] }) },
         onError: error => window.errors.push(error.message),
       });
@@ -84,6 +94,14 @@ try {
   await late.waitForFunction(() => window.session.players.length === 3 && window.session.state.count > 0);
   const counts = await Promise.all(pages.map(p => p.evaluate(() => window.session.state.count)));
   assert.equal(new Set(counts).size, 1, `State mismatch: ${counts}`);
+  const slowPeerId = await late.evaluate(() => window.session.id);
+  await host.evaluate(id => { window.slowPeerId = id; }, slowPeerId);
+  await host.waitForFunction(() => window.pendingSnapshots.length === 1);
+  const fastTick = await guest.evaluate(() => window.session.tick);
+  await guest.waitForFunction(tick => window.session.tick >= tick + 10, fastTick);
+  assert.equal(await host.evaluate(() => window.pendingSnapshots.length), 1, 'Slow peer queue must stay bounded');
+  await host.evaluate(() => { window.slowPeerId = undefined; window.pendingSnapshots.splice(0).forEach(resolve => resolve()); });
+  await late.waitForFunction(tick => window.session.tick >= tick + 10, fastTick);
   assert.ok(events.length > 0, 'Expected real Nostr discovery');
   assert.equal(JSON.stringify(events).includes('ONLY_DATA_CHANNEL_STATE'), false, 'Game state leaked into signaling');
   await late.evaluate(() => window.session.leave());
@@ -94,6 +112,17 @@ try {
   await guest.waitForFunction(() => window.rooms.length === 0);
   await late.waitForFunction(() => window.rooms.length === 0);
   for (const page of pages) await page.evaluate(async () => { await (await window.game.lobby()).close(); });
+  // Exercise both other host roles without reloading the browser contexts.
+  for (const order of [[guest, late, host], [late, host, guest]]) {
+    const [owner, ...visitors] = order;
+    const invitation = await owner.evaluate(async () => { window.session = await window.game.host(); return window.session.invite; });
+    for (const visitor of visitors) await visitor.evaluate(async invite => { window.session = await window.game.join(invite); }, invitation);
+    await owner.waitForFunction(() => window.session.players.length === 3);
+    await visitors[0].evaluate(() => window.session.sendInput(1));
+    await visitors[1].waitForFunction(() => window.session.state.count > 0);
+    await owner.evaluate(() => window.session.leave());
+    for (const visitor of visitors) await visitor.waitForFunction(() => !window.session.connected);
+  }
   for (const page of pages) assert.deepEqual(await page.evaluate(() => window.errors), []);
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await mobile.goto(url);
@@ -115,7 +144,7 @@ try {
   await mobile.locator('#connection-mode').selectOption('auto');
   await mobile.waitForFunction(previous => performance.timeOrigin !== previous, previousDocument);
   assert.equal(await mobile.locator('#connection-mode').inputValue(), 'auto', 'Mode must survive reload with fresh peer connections');
-  console.log('PASS: signed public lobby, real Trystero + WebRTC, 3 peers, host-direct selected pair, LAN-only demo joins, diagnostics, late join, counts, unpublish, signaling privacy, mobile layout');
+  console.log('PASS: 3 peers, independent slow-peer backpressure, rotating hosts, real WebRTC host-direct, public lobby, LAN-only demo, diagnostics, signaling privacy, mobile layout');
 } finally {
   await browser?.close(); await server.close();
   for (const socket of relay.clients) socket.terminate();

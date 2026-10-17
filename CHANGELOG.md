@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Fixed room-wide snapshot stalls caused by a single congested guest: snapshot backpressure is now independent per recipient.
+- Bounded held-input sending to one active and one latest pending update; superseded pending calls resolve without sending obsolete input, and leaving rejects unfinished calls.
+- Smoothed guest positions in the demo without changing authoritative simulation, and added slow-peer and rotating-host regression coverage.
+
 - Added opt-in candidate/ICE/selected-path diagnostics without addresses or secrets, including failed negotiations and reused live connections.
 - Added automatic, host-candidate-only and TURN-only demo modes; switching modes after a connection attempt reloads the page to avoid reusing connections with old ICE settings.
 - Verified real host-to-host selected candidate pairs with default browser networking in the integration test.

@@ -84,6 +84,7 @@ async function connect(host) {
   if (pending) return;
   pending = true; controls(false); $('message').textContent = ''; $('status').textContent = '正在连接…';
   diagnosticReport = undefined; $('diagnostics').textContent = '等待连接诊断…';
+  renderedPositions.clear();
   try {
     session = host ? await game.host({ public: $('public-room').checked, name: $('room-name').value }) : await game.join($('invite').value);
     self = session.id; $('invite').value = session.invite;
@@ -155,11 +156,23 @@ setInterval(() => {
 
 const ctx = $('arena').getContext('2d');
 const colors = ['#a2f3ba', '#7fc6ff', '#ffc785', '#d2abff', '#ff9eaf', '#84e1d5', '#e5e384', '#9daaff'];
+const renderedPositions = new Map();
+let lastDrawAt = performance.now();
 function draw() {
+  const now = performance.now();
+  const blend = 1 - Math.exp(-Math.max(0, now - lastDrawAt) / 35);
+  lastDrawAt = now;
   ctx.fillStyle = '#0b1521'; ctx.fillRect(0, 0, 600, 600);
   ctx.strokeStyle = '#1b2a3c'; ctx.lineWidth = 1;
   for (let n = 30; n < 600; n += 30) { ctx.beginPath(); ctx.moveTo(n, 0); ctx.lineTo(n, 600); ctx.moveTo(0, n); ctx.lineTo(600, n); ctx.stroke(); }
-  Object.entries(state.positions).forEach(([id, p], index) => {
+  for (const id of renderedPositions.keys()) if (!state.positions[id]) renderedPositions.delete(id);
+  Object.entries(state.positions).forEach(([id, target], index) => {
+    // Smooth the guest's 20 Hz snapshots at display refresh rate. Authoritative
+    // positions remain untouched; new players and teleports snap immediately.
+    let p = renderedPositions.get(id);
+    if (!p || session?.isHost || Math.hypot(target.x - p.x, target.y - p.y) > 120) {
+      p = { ...target }; renderedPositions.set(id, p);
+    } else { p.x += (target.x - p.x) * blend; p.y += (target.y - p.y) * blend; }
     if (id === self) { ctx.strokeStyle = '#a2f3ba'; ctx.beginPath(); ctx.arc(p.x, p.y, 23, 0, Math.PI * 2); ctx.stroke(); }
     ctx.fillStyle = colors[index % colors.length]; ctx.beginPath(); ctx.arc(p.x, p.y, 14, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#cfdeed'; ctx.font = '12px system-ui'; ctx.textAlign = 'center'; ctx.fillText(id === self ? '你' : `玩家 ${index + 1}`, p.x, p.y + 40);
