@@ -111,7 +111,7 @@ export function createConnectionDiagnostics(onDiagnostic: (report: ConnectionDia
         }
       }));
       if (stopped) return;
-      // Offer pools contain idle PCs; show real negotiations, or one idle PC
+      // Ignore attempts without remote SDP; show real negotiations, or one PC
       // to distinguish candidate gathering from missing remote signaling.
       const all = [...connections.values()];
       const attempts = all.filter(pc => pc.remoteDescription);

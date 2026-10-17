@@ -27,7 +27,7 @@
   },
   "dependencies": {
     "@noble/secp256k1": "^3.2.0",
-    "trystero": "0.25.4"
+    "trystero": "0.26.0"
   },
   "devDependencies": {
     "playwright": "^1.64.0",

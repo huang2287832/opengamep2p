@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Upgraded Trystero, its Nostr adapter and core from 0.25.4 to 0.26.0 to fix expired-offer candidate loss and stale rejoin handshakes (upstream #204 and #203). All communicating clients must update together because the dependency's action wire format changed.
+- Added a real Chrome regression that forces the older/lower-ID initiator past the previous offer TTL; it failed with candidate-free SDP on 0.25.4 and passes on 0.26.0. Added six quick rejoins with other players still connected.
+
 - Fixed room-wide snapshot stalls caused by a single congested guest: snapshot backpressure is now independent per recipient.
 - Bounded held-input sending to one active and one latest pending update; superseded pending calls resolve without sending obsolete input, and leaving rejects unfinished calls.
 - Smoothed guest positions in the demo without changing authoritative simulation, and added slow-peer and rotating-host regression coverage.

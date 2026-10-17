@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 import { WebSocketServer } from 'ws';
 import { createServer } from 'vite';
+import { testIdleOffer } from './trystero-regressions.mjs';
 
 const relay = new WebSocketServer({ host: '127.0.0.1', port: 0 });
 await new Promise(resolve => relay.once('listening', resolve));
@@ -47,6 +48,10 @@ try {
     // Opt in to normal browser mDNS behavior when checking LAN candidate handling.
     args: process.env.TEST_BROWSER_DEFAULT_NETWORK === '1' ? [] :
       ['--disable-features=WebRtcHideLocalIpsWithMdns', '--force-webrtc-ip-handling-policy=default_public_and_private_interfaces'],
+  });
+  await testIdleOffer({ browser, url, relayUrl,
+    hasSubscription: topic => [...subscriptions.values()].some(subs => [...subs.values()].some(filters =>
+      filters.some(filter => filter['#x']?.includes(topic)))),
   });
   const pages = [];
   for (let index = 0; index < 3; index++) {
@@ -94,6 +99,16 @@ try {
   await late.waitForFunction(() => window.session.players.length === 3 && window.session.state.count > 0);
   const counts = await Promise.all(pages.map(p => p.evaluate(() => window.session.state.count)));
   assert.equal(new Set(counts).size, 1, `State mismatch: ${counts}`);
+  // Upstream #203: fast rejoin must restart both sides' room handshake even
+  // while other players keep the room and shared physical connections alive.
+  const invitation = await host.evaluate(() => window.session.invite);
+  for (let cycle = 0; cycle < 6; cycle++) {
+    await late.evaluate(() => window.session.leave());
+    await host.waitForFunction(() => window.session.players.length === 2);
+    await late.evaluate(async invite => { window.session = await window.game.join(invite); }, invitation);
+    await host.waitForFunction(() => window.session.players.length === 3);
+    await late.waitForFunction(() => window.session.players.length === 3);
+  }
   const slowPeerId = await late.evaluate(() => window.session.id);
   await host.evaluate(id => { window.slowPeerId = id; }, slowPeerId);
   await host.waitForFunction(() => window.pendingSnapshots.length === 1);
@@ -144,7 +159,7 @@ try {
   await mobile.locator('#connection-mode').selectOption('auto');
   await mobile.waitForFunction(previous => performance.timeOrigin !== previous, previousDocument);
   assert.equal(await mobile.locator('#connection-mode').inputValue(), 'auto', 'Mode must survive reload with fresh peer connections');
-  console.log('PASS: 3 peers, independent slow-peer backpressure, rotating hosts, real WebRTC host-direct, public lobby, LAN-only demo, diagnostics, signaling privacy, mobile layout');
+  console.log('PASS: 3 peers, 6 fast rejoins, independent slow-peer backpressure, rotating hosts, real WebRTC host-direct, public lobby, LAN-only demo, diagnostics, signaling privacy, mobile layout');
 } finally {
   await browser?.close(); await server.close();
   for (const socket of relay.clients) socket.terminate();
