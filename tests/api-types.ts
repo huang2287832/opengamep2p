@@ -4,7 +4,12 @@ type State = { positions: Record<string, { x: number; y: number }> };
 type Input = { x: number; y: number };
 const game = createGame<State, Input>({
   appId: 'type-example', initialState: { positions: {} },
-  transport: trysteroTransport({ turnConfig: [{ urls: 'turn:example.invalid', username: 'u', credential: 'c' }] }),
+  transport: trysteroTransport({ turnConfig: [{ urls: 'turn:example.invalid', username: 'u', credential: 'c' }],
+    onDiagnostics(report) {
+      const path: 'host-direct' | 'nat-direct' | 'relay' | undefined = report.connections[0]?.path;
+      void path;
+    },
+  }),
   validateInput: (v): v is Input => typeof v === 'object' && v !== null && 'x' in v && 'y' in v,
   update(state, { inputs, players, dt, tick }) {
     const input: Input | undefined = inputs.get(players[0]?.id ?? '');

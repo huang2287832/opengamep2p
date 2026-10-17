@@ -212,6 +212,16 @@ const transport = trysteroTransport({
 
 ## 跨运营商 / 跨国家无法加入时
 
+同一 Wi-Fi 下出现“手机能分别加入两台电脑，但两台电脑互相加入失败”时，先比较实际路径。手机成功不代表使用了局域网；它也可能通过 NAT 直连或 TURN。示例页面新增“连接诊断”，显示收到对端描述与否、ICE 状态、双方 host / srflx / prflx / relay 候选数量、mDNS 候选数量及实际选中路径。失败后保留诊断，可点击复制；报告不包含 IP、SDP、邀请代码或 TURN 凭据。
+
+- **自动**：允许全部候选，由浏览器 ICE 优先探测本机地址、NAT 直连和 TURN。标准的候选类型优先级见 [RFC 8445 §5.1.2](https://www.rfc-editor.org/rfc/rfc8445.html#section-5.1.2)。候选收集及连通性检查会重叠进行，不是三个串行超时阶段；应用不能保证浏览器始终选中某个接口。
+- **仅本机候选**：禁用 STUN / TURN，检查本机地址能否互通；仍需要信令。host 候选也可能是可公网路由的 IPv6，因此 `host-direct` 表示本机候选直连，并不证明处于同一 Wi-Fi。
+- **仅 TURN**：强制使用中继，检查 TURN 是否可用；只有实际出现 relay 候选并选中中继路径，才能确认使用了 TURN。
+
+排查时两端选择同一模式后重新建房。已有连接尝试后切换模式，示例会刷新页面以清除 Trystero 跨房间复用的连接。没有收到对端描述时先查信令；收到描述但 ICE 失败时，再比较候选交换、mDNS 解析、系统防火墙、VPN/虚拟网卡和浏览器策略。仅凭 mDNS 候选存在不能断言 mDNS 故障。
+
+接入自己的游戏时，可用 `trysteroTransport({ onDiagnostics: report => console.log(report) })` 获取同样的本地诊断，每秒更新一次并在退出时停止。默认不启用监测；连接选择逻辑不受监测影响。
+
 默认加入等待为 45 秒，为公共信令发现及 ICE 协商留出时间；可通过 `joinTimeoutMs` 修改。超时报错中的 `host-not-connected` 表示还没有连接到邀请中的主机，`host-admission-timeout` 表示数据通道已连接但没有收到有效的游戏准入。延长等待不保证解决信令或 ICE 失败。同一 Wi-Fi 仍需要双方访问相同的公共信令节点。
 
 `could not connect ... after exchanging SDP` 表示双方已交换连接信息，但 ICE 未建立连接。可能与 NAT、UDP 防火墙、STUN 或候选地址可达性有关；不能从这个报错确定是某个国家或运营商的固定限制。

@@ -59,7 +59,8 @@ try {
         tickRate: 30, snapshotRate: 30, joinTimeoutMs: 20000,
         validateInput: v => typeof v === 'number' && Math.abs(v) <= 10,
         update: (state, { inputs }) => ({ ...state, count: state.count + [...inputs.values()].reduce((a, b) => a + b, 0) }),
-        transport: trysteroTransport({ relayConfig: { urls: [relayUrl], redundancy: 1 }, rtcConfig: { iceServers: [] } }),
+        transport: trysteroTransport({ relayConfig: { urls: [relayUrl], redundancy: 1 }, rtcConfig: { iceServers: [] },
+          onDiagnostics: report => { window.connectionDiagnostic = report; } }),
         lobby: { transport: nostrDiscovery({ relayUrls: [relayUrl] }) },
         onError: error => window.errors.push(error.message),
       });
@@ -71,6 +72,8 @@ try {
   await guest.waitForFunction(() => window.rooms?.length === 1);
   await guest.evaluate(async () => { window.session = await window.game.join(window.rooms[0].invite); });
   await host.waitForFunction(() => window.session.players.length === 2);
+  await guest.waitForFunction(() => window.connectionDiagnostic?.connections.some(pc => pc.path === 'host-direct'));
+  assert.equal(await guest.evaluate(() => window.connectionDiagnostic.connections.some(pc => pc.path === 'relay')), false);
   await guest.waitForFunction(() => window.rooms[0]?.playerCount === 2);
   await guest.evaluate(() => window.session.sendInput(2));
   await guest.waitForFunction(() => window.session.state.count > 0);
@@ -95,16 +98,24 @@ try {
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await mobile.goto(url);
   const uiHost = await browser.newPage(); await uiHost.goto(url);
+  await uiHost.locator('#connection-mode').selectOption('lan');
+  await mobile.locator('#connection-mode').selectOption('lan');
   await uiHost.locator('#room-name').fill('公开测试房间');
   await uiHost.locator('#host').click();
   await mobile.locator('.room-card h3').filter({ hasText: '公开测试房间' }).waitFor();
   await mobile.locator('.room-card button').click();
   await mobile.waitForFunction(() => document.getElementById('status').textContent.includes('客机'));
   await uiHost.waitForFunction(() => document.getElementById('players').textContent.startsWith('2'));
+  await mobile.waitForFunction(() => document.getElementById('diagnostics').textContent.includes('本机候选直连'));
+  await mobile.locator('summary').click();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'Mobile layout overflows');
   await mobile.locator('#leave').click(); await uiHost.locator('#leave').click();
   await mobile.waitForFunction(() => document.querySelectorAll('.room-card').length === 0);
-  console.log('PASS: signed public lobby, real Trystero + WebRTC, 3 peers, late join, counts, unpublish, one-click demo joins, signaling privacy, mobile layout');
+  const previousDocument = await mobile.evaluate(() => performance.timeOrigin);
+  await mobile.locator('#connection-mode').selectOption('auto');
+  await mobile.waitForFunction(previous => performance.timeOrigin !== previous, previousDocument);
+  assert.equal(await mobile.locator('#connection-mode').inputValue(), 'auto', 'Mode must survive reload with fresh peer connections');
+  console.log('PASS: signed public lobby, real Trystero + WebRTC, 3 peers, host-direct selected pair, LAN-only demo joins, diagnostics, late join, counts, unpublish, signaling privacy, mobile layout');
 } finally {
   await browser?.close(); await server.close();
   for (const socket of relay.clients) socket.terminate();

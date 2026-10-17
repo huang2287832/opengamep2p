@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added opt-in candidate/ICE/selected-path diagnostics without addresses or secrets, including failed negotiations and reused live connections.
+- Added automatic, host-candidate-only and TURN-only demo modes; switching modes after a connection attempt reloads the page to avoid reusing connections with old ICE settings.
+- Verified real host-to-host selected candidate pairs with default browser networking in the integration test.
+
 - Aligned default game signaling relays with lobby discovery instead of using a different appId-shuffled pool; custom relay URLs and redundancy remain supported.
 - Preserved original demo connection errors in the browser console and added a browser integration mode using default network/mDNS behavior.
 

@@ -1,6 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { networkConfig, networkErrorMessage } from '../examples/network-config.mjs';
+import { networkConfig, networkErrorMessage, connectionModeOptions } from '../examples/network-config.mjs';
+
+test('diagnostic modes allow all candidates by default, isolate host candidates, or force TURN without mutating settings', () => {
+  const options = Object.freeze({ turnConfig: [{ urls: 'turn:example.invalid', username: 'u', credential: 'c' }],
+    rtcConfig: Object.freeze({ iceTransportPolicy: 'relay' }), relayConfig: { urls: ['wss://example.invalid'] } });
+  const auto = connectionModeOptions(options, 'auto');
+  assert.equal(auto.rtcConfig.iceTransportPolicy, 'all');
+  assert.equal(auto.rtcConfig.iceServers, undefined);
+  assert.equal(auto.turnConfig, options.turnConfig);
+  const lan = connectionModeOptions(options, 'lan');
+  assert.deepEqual(lan.rtcConfig, { iceServers: [], iceTransportPolicy: 'all' });
+  assert.deepEqual(lan.turnConfig, []);
+  assert.equal(lan.relayConfig, options.relayConfig);
+  assert.equal(connectionModeOptions(options, 'relay').rtcConfig.iceTransportPolicy, 'relay');
+  assert.equal(options.rtcConfig.iceTransportPolicy, 'relay');
+  assert.throws(() => connectionModeOptions(options, 'unknown'));
+});
 
 test('custom signaling relay keeps default STUN enabled', () => {
   const { options } = networkConfig({ VITE_RELAY_URL: 'wss://relay.example' });
@@ -26,9 +42,12 @@ test('invalid or incomplete TURN settings fail without exposing credentials', ()
   assert.deepEqual(networkConfig({}).options, {});
 });
 
-test('SDP failure distinguishes missing TURN from configured but unreachable TURN', () => {
-  assert.match(networkErrorMessage(new Error('could not connect to peer X after exchanging SDP; configure TURN servers with turnConfig')), /公共 TURN 可能不可达/);
-  assert.match(networkErrorMessage(new Error('could not connect to peer X after exchanging SDP; check that your TURN server URLs and credentials are reachable')), /凭据是否有效/);
+test('SDP failure directs users to ICE evidence without claiming TURN was reached or is the cause', () => {
+  for (const detail of ['configure TURN servers with turnConfig', 'check that your TURN server URLs and credentials are reachable']) {
+    const message = networkErrorMessage(new Error(`could not connect to peer X after exchanging SDP; ${detail}`));
+    assert.match(message, /连接诊断/);
+    assert.match(message, /配置了 TURN 不代表/);
+  }
   assert.match(networkErrorMessage(new Error('Join timed out')), /加入超时/);
   assert.equal(networkErrorMessage(new Error('Room is full')), 'Room is full');
 });

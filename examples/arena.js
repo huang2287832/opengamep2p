@@ -1,5 +1,5 @@
 import { createGame, nostrDiscovery, trysteroTransport } from '../src/index.ts';
-import { networkConfig, networkErrorMessage } from './network-config.mjs';
+import { networkConfig, networkErrorMessage, connectionModeOptions } from './network-config.mjs';
 
 const $ = id => document.getElementById(id);
 const keys = new Set();
@@ -12,10 +12,46 @@ catch (error) {
   throw error;
 }
 const { relayUrl, options: connectionOptions } = connection;
+$('connection-mode').value = connectionOptions.rtcConfig?.iceTransportPolicy === 'relay' ? 'relay' : 'auto';
+try {
+  const savedMode = sessionStorage.getItem('ogp-connection-mode');
+  if (['auto', 'lan', 'relay'].includes(savedMode)) $('connection-mode').value = savedMode;
+} catch { /* Storage is optional. */ }
+let networkStarted = false;
+$('connection-mode').onchange = () => {
+  try { sessionStorage.setItem('ogp-connection-mode', $('connection-mode').value); }
+  catch { $('message').textContent = '切换模式后请刷新页面并重新选择，以清理上次连接。'; return; }
+  // Trystero reuses live PCs across rooms. A new mode must use fresh PCs.
+  if (networkStarted) location.reload();
+};
+let diagnosticReport;
+function showDiagnostics(report) {
+  diagnosticReport = { browser: navigator.userAgent, secureContext: isSecureContext,
+    mode: $('connection-mode').value, ...report };
+  const counts = c => `host ${c.host}（mDNS ${c.mdns}）/ srflx ${c.srflx} / prflx ${c.prflx} / relay ${c.relay}`;
+  const paths = { 'host-direct': '本机候选直连', 'nat-direct': 'NAT 直连', relay: 'TURN 中继' };
+  $('diagnostics').textContent = report.connections.map(pc =>
+    `连接 ${pc.id}：${paths[pc.path] ?? '尚未选中路径'}\n` +
+    `连接状态 ${pc.connectionState} / ICE ${pc.iceConnectionState}\n` +
+    `收到对端描述：${pc.remoteDescription ? '是' : '否'}\n` +
+    `本端：${counts(pc.local)}\n对端：${counts(pc.remote)}` +
+    (pc.roundTripTimeMs === undefined ? '' : `\n往返延迟：${pc.roundTripTimeMs} ms`)).join('\n\n') || '等待浏览器创建连接…';
+}
+$('copy-diagnostics').onclick = async () => {
+  if (!diagnosticReport) return;
+  const text = JSON.stringify(diagnosticReport, null, 2);
+  try { await navigator.clipboard.writeText(text); $('message').textContent = '连接诊断已复制'; }
+  catch { $('diagnostics').textContent = text; $('message').textContent = '请选中并复制下方连接诊断'; }
+};
 let session, state = { positions: {} }, self = '', pending = false, publicRooms = [], lobby, openingLobby = false;
 const game = createGame({
   appId: 'org.opengamep2p.arena.v1',
-  transport: trysteroTransport(connectionOptions),
+  transport: args => {
+    networkStarted = true;
+    return trysteroTransport({
+      ...connectionModeOptions(connectionOptions, $('connection-mode').value), onDiagnostics: showDiagnostics,
+    })(args);
+  },
   lobby: relayUrl ? { transport: nostrDiscovery({ relayUrls: [relayUrl] }) } : undefined,
   initialState: { positions: {} },
   validateInput: v => v !== null && typeof v === 'object' &&
@@ -41,11 +77,13 @@ function controls(connected) {
   $('invite').readOnly = connected;
   $('room-name').disabled = connected || pending;
   $('public-room').disabled = connected || pending;
+  $('connection-mode').disabled = connected || pending;
   renderRooms();
 }
 async function connect(host) {
   if (pending) return;
   pending = true; controls(false); $('message').textContent = ''; $('status').textContent = '正在连接…';
+  diagnosticReport = undefined; $('diagnostics').textContent = '等待连接诊断…';
   try {
     session = host ? await game.host({ public: $('public-room').checked, name: $('room-name').value }) : await game.join($('invite').value);
     self = session.id; $('invite').value = session.invite;
